@@ -109,6 +109,8 @@ class ScannerHomePage extends GetView<HomeController> {
                             final document = controller.visibleDocuments[index];
                             return _FileRow(
                               document: document,
+                              isRecognizing: controller.recognizingDocumentIds
+                                  .contains(document.id),
                               onTap: () => controller.openDocument(document),
                               onMoreTap: () =>
                                   controller.showDocumentMenu(document),
@@ -139,6 +141,8 @@ class ScannerHomePage extends GetView<HomeController> {
                             final document = controller.visibleDocuments[index];
                             return _DocumentGridCard(
                               document: document,
+                              isRecognizing: controller.recognizingDocumentIds
+                                  .contains(document.id),
                               onTap: () => controller.openDocument(document),
                             );
                           },
@@ -528,11 +532,13 @@ class _FolderCard extends StatelessWidget {
 class _FileRow extends StatelessWidget {
   const _FileRow({
     required this.document,
+    required this.isRecognizing,
     required this.onTap,
     required this.onMoreTap,
   });
 
   final DocumentItem document;
+  final bool isRecognizing;
   final VoidCallback onTap;
   final VoidCallback onMoreTap;
 
@@ -572,7 +578,7 @@ class _FileRow extends StatelessWidget {
                   ),
                   const SizedBox(height: 1),
                   Text(
-                    '${document.date} / ${_pageLabel(document.pages)}',
+                    _documentSubtitle(document, isRecognizing),
                     style: AppTextStyles.meta,
                   ),
                 ],
@@ -598,9 +604,14 @@ class _FileRow extends StatelessWidget {
 }
 
 class _DocumentGridCard extends StatelessWidget {
-  const _DocumentGridCard({required this.document, required this.onTap});
+  const _DocumentGridCard({
+    required this.document,
+    required this.isRecognizing,
+    required this.onTap,
+  });
 
   final DocumentItem document;
+  final bool isRecognizing;
   final VoidCallback onTap;
 
   @override
@@ -639,7 +650,11 @@ class _DocumentGridCard extends StatelessWidget {
             ),
             const SizedBox(height: 2),
             Text(
-              '${_pageLabel(document.pages)} / ${document.sizeLabel}',
+              isRecognizing
+                  ? 'Recognizing Khmer text'
+                  : document.hasOcrText
+                  ? 'Text saved / ${document.sizeLabel}'
+                  : '${_pageLabel(document.pages)} / ${document.sizeLabel}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: AppTextStyles.meta,
@@ -973,4 +988,15 @@ Color _documentColor(DocumentType type) {
 
 String _pageLabel(int pages) {
   return pages == 1 ? '1 page' : '$pages pages';
+}
+
+String _documentSubtitle(DocumentItem document, bool isRecognizing) {
+  if (isRecognizing) {
+    return 'Recognizing Khmer text...';
+  }
+  if (document.hasOcrText) {
+    return 'Text saved / ${document.date}';
+  }
+
+  return '${document.date} / ${_pageLabel(document.pages)}';
 }

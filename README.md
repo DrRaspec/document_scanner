@@ -15,6 +15,7 @@ The home screen is not static mock data anymore. Scanned and imported files are 
 - Search, file type filters, folder filtering, and list/grid view modes.
 - Open saved local files with `open_filex`.
 - Custom-painted file icons for PDF, Word, and image scans.
+- Khmer OCR through Google Cloud Vision with Khmer (`km`) and English (`en`) language hints.
 
 ## Project Structure
 
@@ -47,10 +48,28 @@ Install dependencies:
 flutter pub get
 ```
 
+Create a local env file:
+
+```sh
+cp .env.example .env
+```
+
+Then set:
+
+```text
+GOOGLE_VISION_API_KEY=your_api_key_here
+```
+
 Run the app:
 
 ```sh
 flutter run
+```
+
+You can also pass the key without a file:
+
+```sh
+flutter run --dart-define=GOOGLE_VISION_API_KEY=your_api_key_here
 ```
 
 Analyze the project:
@@ -62,6 +81,9 @@ flutter analyze
 ## Notes
 
 - The file list is created from real files saved by the app, not bundled sample assets.
+- `.env` is ignored by git. Commit `.env.example`, not real API keys.
 - iOS camera/photo usage descriptions are set in `ios/Runner/Info.plist`.
+- Khmer OCR runs on image files through Google Cloud Vision, so it requires internet access and a valid API key.
+- PDF and Word files can be stored/opened, but they are not OCR-processed yet.
 - `open_filex` currently prints a Flutter warning about iOS Swift Package Manager support. It is a warning, not an analyzer error.
 - The app stores files in platform app storage, so deleting the app will remove its local library.

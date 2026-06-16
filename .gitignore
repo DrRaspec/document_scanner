@@ -60,3 +60,5 @@ ios/Pods/
 ios/Podfile.lock
 ios/.symlinks/
 ios/Runner.xcworkspace/xcshareddata/WorkspaceSettings.xcsettings
+ios/Runner.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
+ios/Runner.xcworkspace/xcshareddata/swiftpm/

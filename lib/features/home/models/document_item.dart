@@ -11,6 +11,7 @@ class DocumentItem {
     required this.folder,
     required this.path,
     required this.createdAt,
+    this.ocrText,
   });
 
   final String id;
@@ -22,6 +23,9 @@ class DocumentItem {
   final String folder;
   final String path;
   final DateTime createdAt;
+  final String? ocrText;
+
+  bool get hasOcrText => ocrText != null && ocrText!.trim().isNotEmpty;
 
   bool matches(String query) {
     final value = query.trim().toLowerCase();
@@ -31,7 +35,34 @@ class DocumentItem {
 
     return title.toLowerCase().contains(value) ||
         folder.toLowerCase().contains(value) ||
-        type.name.toLowerCase().contains(value);
+        type.name.toLowerCase().contains(value) ||
+        (ocrText?.toLowerCase().contains(value) ?? false);
+  }
+
+  DocumentItem copyWith({
+    String? id,
+    String? title,
+    String? date,
+    String? sizeLabel,
+    DocumentType? type,
+    int? pages,
+    String? folder,
+    String? path,
+    DateTime? createdAt,
+    String? ocrText,
+  }) {
+    return DocumentItem(
+      id: id ?? this.id,
+      title: title ?? this.title,
+      date: date ?? this.date,
+      sizeLabel: sizeLabel ?? this.sizeLabel,
+      type: type ?? this.type,
+      pages: pages ?? this.pages,
+      folder: folder ?? this.folder,
+      path: path ?? this.path,
+      createdAt: createdAt ?? this.createdAt,
+      ocrText: ocrText ?? this.ocrText,
+    );
   }
 
   Map<String, dynamic> toJson() {
@@ -45,6 +76,7 @@ class DocumentItem {
       'folder': folder,
       'path': path,
       'createdAt': createdAt.toIso8601String(),
+      'ocrText': ocrText,
     };
   }
 
@@ -59,6 +91,7 @@ class DocumentItem {
       folder: json['folder'] as String,
       path: json['path'] as String,
       createdAt: DateTime.parse(json['createdAt'] as String),
+      ocrText: json['ocrText'] as String?,
     );
   }
 }

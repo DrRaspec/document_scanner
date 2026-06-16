@@ -1,8 +1,10 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:get/get.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:open_filex/open_filex.dart';
@@ -20,9 +22,19 @@ class HomeController extends GetxController {
   static const _scanFolderName = 'Scans';
   static const _importFolderName = 'Imports';
   static const _libraryFileName = 'library.json';
+  static const _googleVisionApiKey = String.fromEnvironment(
+    'GOOGLE_VISION_API_KEY',
+  );
 
   final searchController = TextEditingController();
   final _imagePicker = ImagePicker();
+  final _dio = Dio(
+    BaseOptions(
+      baseUrl: 'https://vision.googleapis.com/v1',
+      connectTimeout: const Duration(seconds: 20),
+      receiveTimeout: const Duration(seconds: 45),
+    ),
+  );
 
   final isSearching = false.obs;
   final isLoading = true.obs;
@@ -30,6 +42,7 @@ class HomeController extends GetxController {
   final selectedFolderName = RxnString();
   final viewMode = HomeViewMode.list.obs;
   final query = ''.obs;
+  final recognizingDocumentIds = <String>{}.obs;
 
   final folders = <FolderItem>[].obs;
   final documents = <DocumentItem>[].obs;
@@ -293,6 +306,19 @@ class HomeController extends GetxController {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              if (document.type == DocumentType.image)
+                ListTile(
+                  leading: const Icon(Icons.translate),
+                  title: const Text('Recognize Khmer text'),
+                  subtitle: const Text('Uses Google Vision OCR with km hint'),
+                  onTap: () => Get.back(result: _DocumentAction.recognizeText),
+                ),
+              if (document.hasOcrText)
+                ListTile(
+                  leading: const Icon(Icons.notes_outlined),
+                  title: const Text('View extracted text'),
+                  onTap: () => Get.back(result: _DocumentAction.viewText),
+                ),
               ListTile(
                 leading: const Icon(Icons.open_in_new),
                 title: const Text('Open'),
@@ -311,9 +337,127 @@ class HomeController extends GetxController {
 
     if (action == _DocumentAction.open) {
       await openDocument(document);
+    } else if (action == _DocumentAction.recognizeText) {
+      await recognizeKhmerText(document);
+    } else if (action == _DocumentAction.viewText) {
+      _showExtractedText(document);
     } else if (action == _DocumentAction.delete) {
       await _deleteDocument(document);
     }
+  }
+
+  Future<void> recognizeKhmerText(DocumentItem document) async {
+    final apiKey = _googleVisionApiKeyFromEnv;
+    if (apiKey.isEmpty) {
+      _showActionMessage(
+        'Missing GOOGLE_VISION_API_KEY in .env or --dart-define.',
+      );
+      return;
+    }
+    if (document.type != DocumentType.image) {
+      _showActionMessage('OCR currently supports image scans only.');
+      return;
+    }
+    if (recognizingDocumentIds.contains(document.id)) {
+      return;
+    }
+
+    recognizingDocumentIds.add(document.id);
+    try {
+      final imageBytes = await File(document.path).readAsBytes();
+      final response = await _dio.post<Map<String, dynamic>>(
+        '/images:annotate',
+        queryParameters: {'key': apiKey},
+        data: {
+          'requests': [
+            {
+              'image': {'content': base64Encode(imageBytes)},
+              'features': [
+                {'type': 'DOCUMENT_TEXT_DETECTION'},
+              ],
+              'imageContext': {
+                'languageHints': ['km', 'en'],
+              },
+            },
+          ],
+        },
+      );
+      final text = _extractVisionText(response.data);
+      final cleanText = text.trim();
+      if (cleanText.isEmpty) {
+        _showActionMessage('No Khmer text was found in this image.');
+        return;
+      }
+
+      final index = documents.indexWhere((item) => item.id == document.id);
+      if (index == -1) {
+        return;
+      }
+
+      final updated = documents[index].copyWith(ocrText: cleanText);
+      documents[index] = updated;
+      await _saveLibrary();
+      _showExtractedText(updated);
+    } on DioException catch (error) {
+      final responseData = error.response?.data;
+      final responseError = responseData is Map ? responseData['error'] : null;
+      final message = responseError is Map
+          ? responseError['message']?.toString()
+          : null;
+      _showActionMessage(message ?? 'Khmer OCR request failed.');
+    } catch (_) {
+      _showActionMessage('Khmer OCR failed for this image.');
+    } finally {
+      recognizingDocumentIds.remove(document.id);
+    }
+  }
+
+  String get _googleVisionApiKeyFromEnv {
+    return dotenv.env['GOOGLE_VISION_API_KEY']?.trim().isNotEmpty == true
+        ? dotenv.env['GOOGLE_VISION_API_KEY']!.trim()
+        : _googleVisionApiKey;
+  }
+
+  String _extractVisionText(Map<String, dynamic>? data) {
+    final responses = data?['responses'];
+    if (responses is! List || responses.isEmpty) {
+      return '';
+    }
+
+    final first = responses.first;
+    if (first is! Map<String, dynamic>) {
+      return '';
+    }
+    final annotation = first['fullTextAnnotation'];
+    if (annotation is Map<String, dynamic>) {
+      return annotation['text']?.toString() ?? '';
+    }
+
+    final textAnnotations = first['textAnnotations'];
+    if (textAnnotations is List && textAnnotations.isNotEmpty) {
+      final firstText = textAnnotations.first;
+      if (firstText is Map<String, dynamic>) {
+        return firstText['description']?.toString() ?? '';
+      }
+    }
+
+    return '';
+  }
+
+  void _showExtractedText(DocumentItem document) {
+    final text = document.ocrText?.trim();
+    if (text == null || text.isEmpty) {
+      _showActionMessage('No extracted text saved yet.');
+      return;
+    }
+
+    Get.dialog<void>(
+      AlertDialog(
+        title: Text(document.title),
+        content: SingleChildScrollView(child: SelectableText(text)),
+        actions: [TextButton(onPressed: Get.back, child: const Text('Close'))],
+      ),
+    );
   }
 
   Future<void> _deleteDocument(DocumentItem document) async {
@@ -509,4 +653,4 @@ class HomeController extends GetxController {
   }
 }
 
-enum _DocumentAction { open, delete }
+enum _DocumentAction { recognizeText, viewText, open, delete }
