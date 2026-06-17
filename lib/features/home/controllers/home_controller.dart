@@ -283,6 +283,12 @@ class HomeController extends GetxController {
           _showActionMessage('No readable text was found in this image.');
           return;
         }
+      } else if (document.type == DocumentType.pdf && _ocr.supportsOfflineOcr) {
+        extractedText = await _ocr.recognizePdfText(document.path);
+        if (extractedText.isEmpty) {
+          _showActionMessage('No readable text was found in this PDF.');
+          return;
+        }
       } else {
         // ── PDF / Word: extract embedded text layer ──
         extractedText = await _textExtraction.extractText(document.path);

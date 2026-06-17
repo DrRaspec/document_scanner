@@ -19,6 +19,9 @@ class DocumentViewerScreen extends StatefulWidget {
 
 class _DocumentViewerScreenState extends State<DocumentViewerScreen> {
   final _pdfViewerController = PdfViewerController();
+  final _ocrService = OcrService();
+  final _textExtraction = TextExtractionService();
+  bool _isExtractingPdfText = false;
 
   Widget _buildBody() {
     switch (widget.document.type) {
@@ -27,6 +30,7 @@ class _DocumentViewerScreenState extends State<DocumentViewerScreen> {
           File(widget.document.path),
           controller: _pdfViewerController,
           enableTextSelection: true,
+          initialZoomLevel: 1.25,
           pageSpacing: 0,
           canShowScrollHead: false,
           pageLayoutMode: PdfPageLayoutMode.continuous,
@@ -48,10 +52,139 @@ class _DocumentViewerScreenState extends State<DocumentViewerScreen> {
     }
   }
 
+  Future<void> _showPdfTextBottomSheet() async {
+    setState(() {
+      _isExtractingPdfText = true;
+    });
+
+    String textToShow;
+    try {
+      textToShow = _ocrService.supportsOfflineOcr
+          ? await _ocrService.recognizePdfText(widget.document.path)
+          : await _textExtraction.extractText(widget.document.path);
+
+      if (textToShow.trim().isEmpty && _ocrService.supportsOfflineOcr) {
+        textToShow = await _extractPdfFallbackText();
+      }
+    } catch (e) {
+      textToShow = 'Could not extract selectable text from this PDF.\n\n$e';
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isExtractingPdfText = false;
+        });
+      }
+    }
+
+    if (!mounted) return;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) {
+        return DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.75,
+          minChildSize: 0.35,
+          builder: (context, scrollController) {
+            final canCopy = !textToShow.startsWith('Could not extract');
+
+            return Container(
+              padding: const EdgeInsets.all(16),
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          'PDF Text',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Copy all',
+                        icon: const Icon(Icons.copy),
+                        onPressed: canCopy
+                            ? () {
+                                Clipboard.setData(
+                                  ClipboardData(text: textToShow),
+                                );
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Copied to clipboard'),
+                                  ),
+                                );
+                              }
+                            : null,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      controller: scrollController,
+                      child: SelectionArea(
+                        child: Text(
+                          textToShow.trim().isEmpty
+                              ? 'No text found.'
+                              : textToShow,
+                          style: const TextStyle(fontSize: 16),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<String> _extractPdfFallbackText() async {
+    try {
+      final fallbackText = await _textExtraction.extractText(
+        widget.document.path,
+      );
+      if (fallbackText.trim().isEmpty) {
+        return 'OCR found no text in this PDF.';
+      }
+
+      return 'OCR found no text. Fallback text from the PDF layer is shown below, but it may be incorrect for Khmer.\n\n$fallbackText';
+    } catch (_) {
+      return 'OCR found no text in this PDF.';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(widget.document.title)),
+      appBar: AppBar(
+        title: Text(widget.document.title),
+        actions: [
+          if (widget.document.type == DocumentType.pdf)
+            IconButton(
+              tooltip: 'Extract text',
+              onPressed: _isExtractingPdfText ? null : _showPdfTextBottomSheet,
+              icon: _isExtractingPdfText
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.text_fields),
+            ),
+        ],
+      ),
       body: _buildBody(),
     );
   }

@@ -6,15 +6,16 @@ import 'package:path_provider/path_provider.dart';
 class OcrService {
   static const _channel = MethodChannel('doc_scanner/ocr');
 
-  /// Returns true on Android (Tesseract) and iOS 13+ (Vision framework).
+  /// Returns true on Android and iOS, both backed by Tesseract.
   bool get supportsOfflineOcr => Platform.isAndroid || Platform.isIOS;
 
   Future<String> recognizeImageText(String imagePath) async {
     if (Platform.isIOS) {
-      // iOS: delegate to the Vision framework handler in AppDelegate.swift.
-      // No tessdata assets needed — the OS handles the model.
+      final tessDataPath = await _prepareTessDataDirectory();
       final text = await _channel.invokeMethod<String>('recognizeText', {
         'imagePath': imagePath,
+        'dataPath': tessDataPath,
+        'language': _language,
       });
       return text?.trim() ?? '';
     }
@@ -23,6 +24,30 @@ class OcrService {
     final tessDataPath = await _prepareTessData();
     final text = await _channel.invokeMethod<String>('recognizeText', {
       'imagePath': imagePath,
+      'dataPath': tessDataPath,
+      'language': _language,
+    });
+    return text?.trim() ?? '';
+  }
+
+  Future<String> recognizePdfText(String pdfPath) async {
+    if (!supportsOfflineOcr) {
+      throw UnsupportedError('OCR is not supported on this platform.');
+    }
+
+    if (Platform.isIOS) {
+      final tessDataPath = await _prepareTessDataDirectory();
+      final text = await _channel.invokeMethod<String>('recognizePdfText', {
+        'pdfPath': pdfPath,
+        'dataPath': tessDataPath,
+        'language': _language,
+      });
+      return text?.trim() ?? '';
+    }
+
+    final tessDataPath = await _prepareTessData();
+    final text = await _channel.invokeMethod<String>('recognizePdfText', {
+      'pdfPath': pdfPath,
       'dataPath': tessDataPath,
       'language': _language,
     });
@@ -46,6 +71,20 @@ class OcrService {
     }
 
     return documentsDirectory.path;
+  }
+
+  Future<String> _prepareTessDataDirectory() async {
+    final documentsDirectory = await getApplicationDocumentsDirectory();
+    final tessDataDirectory = Directory('${documentsDirectory.path}/tessdata');
+    if (!await tessDataDirectory.exists()) {
+      await tessDataDirectory.create(recursive: true);
+    }
+
+    for (final fileName in _trainedDataFiles) {
+      await _copyTessDataIfNeeded(tessDataDirectory, fileName);
+    }
+
+    return tessDataDirectory.path;
   }
 
   Future<void> _copyTessDataIfNeeded(
