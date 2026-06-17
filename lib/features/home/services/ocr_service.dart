@@ -9,13 +9,16 @@ class OcrService {
   /// Returns true on Android and iOS, both backed by Tesseract.
   bool get supportsOfflineOcr => Platform.isAndroid || Platform.isIOS;
 
-  Future<String> recognizeImageText(String imagePath) async {
+  Future<String> recognizeImageText(
+    String imagePath, {
+    String language = _mixedLanguage,
+  }) async {
     if (Platform.isIOS) {
       final tessDataPath = await _prepareTessDataDirectory();
       final text = await _channel.invokeMethod<String>('recognizeText', {
         'imagePath': imagePath,
         'dataPath': tessDataPath,
-        'language': _language,
+        'language': language,
       });
       return text?.trim() ?? '';
     }
@@ -25,12 +28,15 @@ class OcrService {
     final text = await _channel.invokeMethod<String>('recognizeText', {
       'imagePath': imagePath,
       'dataPath': tessDataPath,
-      'language': _language,
+      'language': language,
     });
     return text?.trim() ?? '';
   }
 
-  Future<String> recognizePdfText(String pdfPath) async {
+  Future<String> recognizePdfText(
+    String pdfPath, {
+    String language = _khmerLanguage,
+  }) async {
     if (!supportsOfflineOcr) {
       throw UnsupportedError('OCR is not supported on this platform.');
     }
@@ -40,7 +46,7 @@ class OcrService {
       final text = await _channel.invokeMethod<String>('recognizePdfText', {
         'pdfPath': pdfPath,
         'dataPath': tessDataPath,
-        'language': _language,
+        'language': language,
       });
       return text?.trim() ?? '';
     }
@@ -49,14 +55,15 @@ class OcrService {
     final text = await _channel.invokeMethod<String>('recognizePdfText', {
       'pdfPath': pdfPath,
       'dataPath': tessDataPath,
-      'language': _language,
+      'language': language,
     });
     return text?.trim() ?? '';
   }
 
   // ─── Android-only helpers ────────────────────────────────────────────────
 
-  static const _language = 'khm+eng';
+  static const _khmerLanguage = 'khm';
+  static const _mixedLanguage = 'khm+eng';
   static const _trainedDataFiles = ['khm.traineddata', 'eng.traineddata'];
 
   Future<String> _prepareTessData() async {

@@ -22,28 +22,47 @@ class _DocumentViewerScreenState extends State<DocumentViewerScreen> {
   final _ocrService = OcrService();
   final _textExtraction = TextExtractionService();
   bool _isExtractingPdfText = false;
+  bool _isPdfTextLayerVisible = false;
+  String? _pdfText;
 
   Widget _buildBody() {
     switch (widget.document.type) {
       case DocumentType.pdf:
-        return SfPdfViewer.file(
-          File(widget.document.path),
-          controller: _pdfViewerController,
-          enableTextSelection: true,
-          initialZoomLevel: 1.25,
-          pageSpacing: 0,
-          canShowScrollHead: false,
-          pageLayoutMode: PdfPageLayoutMode.continuous,
-          onDocumentLoadFailed: (PdfDocumentLoadFailedDetails details) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  'Failed to load PDF: ${details.error} - ${details.description}',
+        return Stack(
+          children: [
+            SfPdfViewer.file(
+              File(widget.document.path),
+              controller: _pdfViewerController,
+              enableTextSelection: true,
+              initialZoomLevel: 1.25,
+              pageSpacing: 0,
+              canShowScrollHead: false,
+              pageLayoutMode: PdfPageLayoutMode.continuous,
+              onDocumentLoadFailed: (PdfDocumentLoadFailedDetails details) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      'Failed to load PDF: ${details.error} - ${details.description}',
+                    ),
+                    duration: const Duration(seconds: 10),
+                  ),
+                );
+              },
+            ),
+            if (_isPdfTextLayerVisible)
+              Positioned.fill(
+                child: _PdfTextLayer(
+                  isLoading: _isExtractingPdfText,
+                  text: _pdfText,
+                  onCopyAll: _copyPdfText,
+                  onClose: () {
+                    setState(() {
+                      _isPdfTextLayerVisible = false;
+                    });
+                  },
                 ),
-                duration: const Duration(seconds: 10),
               ),
-            );
-          },
+          ],
         );
       case DocumentType.image:
         return _ImageViewer(document: widget.document);
@@ -52,9 +71,19 @@ class _DocumentViewerScreenState extends State<DocumentViewerScreen> {
     }
   }
 
-  Future<void> _showPdfTextBottomSheet() async {
+  Future<void> _showPdfTextLayer() async {
+    if (_isExtractingPdfText) return;
+
+    if (_pdfText != null) {
+      setState(() {
+        _isPdfTextLayerVisible = true;
+      });
+      return;
+    }
+
     setState(() {
       _isExtractingPdfText = true;
+      _isPdfTextLayerVisible = true;
     });
 
     String textToShow;
@@ -77,77 +106,24 @@ class _DocumentViewerScreenState extends State<DocumentViewerScreen> {
     }
 
     if (!mounted) return;
+    setState(() {
+      _pdfText = textToShow;
+    });
+  }
 
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (context) {
-        return DraggableScrollableSheet(
-          expand: false,
-          initialChildSize: 0.75,
-          minChildSize: 0.35,
-          builder: (context, scrollController) {
-            final canCopy = !textToShow.startsWith('Could not extract');
+  void _copyPdfText() {
+    final text = _pdfText?.trim();
+    if (text == null ||
+        text.isEmpty ||
+        text.startsWith('Could not extract') ||
+        text.startsWith('OCR found no text')) {
+      return;
+    }
 
-            return Container(
-              padding: const EdgeInsets.all(16),
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    children: [
-                      const Expanded(
-                        child: Text(
-                          'PDF Text',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: 'Copy all',
-                        icon: const Icon(Icons.copy),
-                        onPressed: canCopy
-                            ? () {
-                                Clipboard.setData(
-                                  ClipboardData(text: textToShow),
-                                );
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Copied to clipboard'),
-                                  ),
-                                );
-                              }
-                            : null,
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Expanded(
-                    child: SingleChildScrollView(
-                      controller: scrollController,
-                      child: SelectionArea(
-                        child: Text(
-                          textToShow.trim().isEmpty
-                              ? 'No text found.'
-                              : textToShow,
-                          style: const TextStyle(fontSize: 16),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
+    Clipboard.setData(ClipboardData(text: text));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Copied to clipboard')));
   }
 
   Future<String> _extractPdfFallbackText() async {
@@ -173,19 +149,164 @@ class _DocumentViewerScreenState extends State<DocumentViewerScreen> {
         actions: [
           if (widget.document.type == DocumentType.pdf)
             IconButton(
-              tooltip: 'Extract text',
-              onPressed: _isExtractingPdfText ? null : _showPdfTextBottomSheet,
+              tooltip: _isPdfTextLayerVisible
+                  ? 'Hide text layer'
+                  : 'Show text layer',
+              onPressed: _isExtractingPdfText
+                  ? null
+                  : _isPdfTextLayerVisible
+                  ? () {
+                      setState(() {
+                        _isPdfTextLayerVisible = false;
+                      });
+                    }
+                  : _showPdfTextLayer,
               icon: _isExtractingPdfText
                   ? const SizedBox(
                       width: 20,
                       height: 20,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Icon(Icons.text_fields),
+                  : Icon(
+                      _isPdfTextLayerVisible
+                          ? Icons.text_fields
+                          : Icons.document_scanner_outlined,
+                    ),
             ),
         ],
       ),
       body: _buildBody(),
+    );
+  }
+}
+
+class _PdfTextLayer extends StatelessWidget {
+  final bool isLoading;
+  final String? text;
+  final VoidCallback onCopyAll;
+  final VoidCallback onClose;
+
+  const _PdfTextLayer({
+    required this.isLoading,
+    required this.text,
+    required this.onCopyAll,
+    required this.onClose,
+  });
+
+  bool get _canCopy {
+    final value = text?.trim();
+    return value != null &&
+        value.isNotEmpty &&
+        !value.startsWith('Could not extract') &&
+        !value.startsWith('OCR found no text');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final displayText = text?.trim();
+
+    return ColoredBox(
+      color: Colors.black.withValues(alpha: 0.08),
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
+          child: Column(
+            children: [
+              IgnorePointer(
+                child: Container(
+                  height: 96,
+                  decoration: BoxDecoration(
+                    color: Colors.amberAccent.withValues(alpha: 0.18),
+                    border: Border.all(
+                      color: Colors.amber.shade700.withValues(alpha: 0.45),
+                    ),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ),
+              const Spacer(),
+              Container(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.sizeOf(context).height * 0.42,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.96),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.amber.shade700, width: 1.2),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x33000000),
+                      blurRadius: 18,
+                      offset: Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 6, 6),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.document_scanner_outlined,
+                            size: 18,
+                            color: Colors.amber.shade900,
+                          ),
+                          const SizedBox(width: 8),
+                          const Expanded(
+                            child: Text(
+                              'OCR text layer',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 15,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Copy all',
+                            onPressed: _canCopy ? onCopyAll : null,
+                            icon: const Icon(Icons.copy, size: 20),
+                          ),
+                          IconButton(
+                            tooltip: 'Close',
+                            onPressed: onClose,
+                            icon: const Icon(Icons.close, size: 20),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    Flexible(
+                      child: isLoading
+                          ? const Padding(
+                              padding: EdgeInsets.all(24),
+                              child: Center(child: CircularProgressIndicator()),
+                            )
+                          : SingleChildScrollView(
+                              padding: const EdgeInsets.all(14),
+                              child: SelectionArea(
+                                child: Text(
+                                  displayText == null || displayText.isEmpty
+                                      ? 'No text found.'
+                                      : displayText,
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    height: 1.5,
+                                    backgroundColor: Color(0x4DFFE082),
+                                  ),
+                                ),
+                              ),
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

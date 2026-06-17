@@ -9,6 +9,8 @@ enum HomeMenuAction { scan, importFiles, newFolder, refresh }
 
 enum DocumentMenuAction { recognizeText, viewText, open, delete }
 
+enum ImportSource { photos, files }
+
 class HomeDialogs {
   Future<HomeMenuAction?> showHomeMenu() {
     return Get.bottomSheet<HomeMenuAction>(
@@ -70,6 +72,34 @@ class HomeDialogs {
     );
   }
 
+  Future<ImportSource?> showImportSourceDialog() {
+    return Get.bottomSheet<ImportSource>(
+      SafeArea(
+        child: Material(
+          color: AppColors.white,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.photo_library_outlined),
+                title: const Text('Photo library'),
+                subtitle: const Text('Import an image from Photos'),
+                onTap: () => Get.back(result: ImportSource.photos),
+              ),
+              ListTile(
+                leading: const Icon(Icons.folder_open_outlined),
+                title: const Text('Files'),
+                subtitle: const Text('Import PDF or Word documents'),
+                onTap: () => Get.back(result: ImportSource.files),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<DocumentMenuAction?> showDocumentMenu(DocumentItem document) {
     return Get.bottomSheet<DocumentMenuAction>(
       SafeArea(
@@ -94,9 +124,7 @@ class HomeDialogs {
                 ListTile(
                   leading: const Icon(Icons.picture_as_pdf_outlined),
                   title: const Text('Extract text'),
-                  subtitle: const Text(
-                    'Pull all embedded text from this PDF',
-                  ),
+                  subtitle: const Text('Pull all embedded text from this PDF'),
                   onTap: () =>
                       Get.back(result: DocumentMenuAction.recognizeText),
                 )
@@ -203,10 +231,7 @@ class HomeDialogs {
                     label: const Text('Copy all'),
                   ),
                   const SizedBox(width: 8),
-                  FilledButton(
-                    onPressed: Get.back,
-                    child: const Text('Close'),
-                  ),
+                  FilledButton(onPressed: Get.back, child: const Text('Close')),
                 ],
               ),
             ),

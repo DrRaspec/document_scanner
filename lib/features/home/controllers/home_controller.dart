@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -135,45 +137,79 @@ class HomeController extends GetxController {
   }
 
   Future<void> importPhoto() async {
+    final source = await _dialogs.showImportSourceDialog();
+    switch (source) {
+      case ImportSource.photos:
+        await _importImageFromGallery();
+      case ImportSource.files:
+        await importFiles();
+      case null:
+        break;
+    }
+  }
+
+  Future<void> _importImageFromGallery() async {
+    try {
+      final image = await _imagePicker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 92,
+      );
+      if (image == null) {
+        return;
+      }
+
+      final bytes = await image.readAsBytes();
+      final savedFile = await _library.copyBytesIntoLibrary(
+        bytes: bytes,
+        fallbackName: image.name,
+      );
+      final document = await _importedDocumentFrom(
+        title: image.name,
+        path: savedFile.path,
+      );
+
+      documents.insert(0, document);
+      _refreshFolderCounts();
+      await _saveLibrary();
+      _showActionMessage('Image imported.');
+    } catch (error) {
+      _showActionMessage('Image import failed: $error');
+    }
+  }
+
+  Future<void> importFiles() async {
     try {
       const typeGroup = XTypeGroup(
-        label: 'Documents and images',
+        label: 'Documents',
         // extensions: used on Android & desktop
-        extensions: [
-          'pdf',
-          'doc',
-          'docx',
-          'jpg',
-          'jpeg',
-          'png',
-          'heic',
-          'webp',
-        ],
+        extensions: ['pdf', 'doc', 'docx'],
         // uniformTypeIdentifiers: required on iOS.
-        // 'public.data' is a catch-all that covers .docx and any other binary
-        // file whose specific UTI is not registered on the device (e.g. when
-        // Microsoft Word is not installed).
         uniformTypeIdentifiers: [
           'com.adobe.pdf', // .pdf
           'com.microsoft.word.doc', // .doc (legacy binary)
           // .docx — two UTIs for broad device support
           'org.openxmlformats.officedocument.wordprocessingml.document',
           'com.microsoft.word.wordml',
-          'public.jpeg', // .jpg/.jpeg
-          'public.png', // .png
-          'public.heic', // .heic
-          'org.webmproject.webp', // .webp
-          // Catch-all: shows ALL files in the picker (covers unregistered types)
-          'public.data',
+          'public.composite-content', // fallback for document-like files
         ],
       );
-      final files = await openFiles(acceptedTypeGroups: [typeGroup]);
+      final List<XFile> files;
+      if (Platform.isIOS) {
+        final file = await openFile();
+        files = file == null ? <XFile>[] : <XFile>[file];
+      } else {
+        files = await openFiles(acceptedTypeGroups: [typeGroup]);
+      }
       if (files.isEmpty) {
         return;
       }
 
       var importedCount = 0;
       for (final pickedFile in files) {
+        if (!_isSupportedImportFile(pickedFile.name)) {
+          continue;
+        }
+
         // Use readAsBytes() instead of File(path).copy() so the code works
         // on Android where file_selector may return a content:// URI path
         // that File() cannot open directly.
@@ -203,6 +239,11 @@ class HomeController extends GetxController {
     }
   }
 
+  bool _isSupportedImportFile(String fileName) {
+    const supportedExtensions = {'pdf', 'doc', 'docx'};
+    return supportedExtensions.contains(_library.fileExtension(fileName));
+  }
+
   Future<void> showHomeMenu() async {
     final action = await _dialogs.showHomeMenu();
 
@@ -210,7 +251,7 @@ class HomeController extends GetxController {
       case HomeMenuAction.scan:
         await startScan();
       case HomeMenuAction.importFiles:
-        await importPhoto();
+        await importFiles();
       case HomeMenuAction.newFolder:
         await createFolder();
       case HomeMenuAction.refresh:
