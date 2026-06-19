@@ -1,9 +1,16 @@
 package com.bunleng.doc_scanner
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.Matrix
+import android.graphics.Paint
 import android.graphics.pdf.PdfRenderer
+import android.media.ExifInterface
+import android.os.Build
 import android.os.ParcelFileDescriptor
 import com.googlecode.tesseract.android.TessBaseAPI
 import io.flutter.embedding.android.FlutterActivity
@@ -52,8 +59,13 @@ class MainActivity : FlutterActivity() {
                     return@Thread
                 }
 
-                tessBaseApi.setImage(imageFile)
-                val text = tessBaseApi.getUTF8Text() ?: ""
+                val bitmap = prepareImageForOcr(imageFile)
+                val text = try {
+                    tessBaseApi.setImage(bitmap)
+                    tessBaseApi.getUTF8Text() ?: ""
+                } finally {
+                    bitmap.recycle()
+                }
 
                 runOnUiThread {
                     result.success(text)
@@ -66,6 +78,130 @@ class MainActivity : FlutterActivity() {
                 tessBaseApi.recycle()
             }
         }.start()
+    }
+
+    /**
+     * Camera photos need more preparation than PDF pages. This method:
+     * - applies the JPEG EXIF rotation;
+     * - limits very large camera images to an OCR-friendly size;
+     * - upscales unusually small images;
+     * - removes colour and increases contrast so Khmer character marks remain clear.
+     */
+    private fun prepareImageForOcr(imageFile: File): Bitmap {
+        val bounds = BitmapFactory.Options().apply {
+            inJustDecodeBounds = true
+        }
+        BitmapFactory.decodeFile(imageFile.absolutePath, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            throw IllegalArgumentException("The selected image could not be decoded.")
+        }
+
+        var sampleSize = 1
+        val longestSourceEdge = maxOf(bounds.outWidth, bounds.outHeight)
+        while (longestSourceEdge / (sampleSize * 2) >= MAX_OCR_EDGE) {
+            sampleSize *= 2
+        }
+
+        val decoded = BitmapFactory.decodeFile(
+            imageFile.absolutePath,
+            BitmapFactory.Options().apply {
+                inSampleSize = sampleSize
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            }
+        ) ?: throw IllegalArgumentException("The selected image could not be decoded.")
+
+        var working = rotateFromExif(decoded, imageFile)
+        if (working !== decoded) {
+            decoded.recycle()
+        }
+
+        val longestEdge = maxOf(working.width, working.height)
+        val targetEdge = longestEdge.coerceIn(MIN_OCR_EDGE, MAX_OCR_EDGE)
+        if (targetEdge != longestEdge) {
+            val scale = targetEdge.toFloat() / longestEdge
+            val scaled = Bitmap.createScaledBitmap(
+                working,
+                (working.width * scale).toInt().coerceAtLeast(1),
+                (working.height * scale).toInt().coerceAtLeast(1),
+                true
+            )
+            if (scaled !== working) {
+                working.recycle()
+                working = scaled
+            }
+        }
+
+        val enhanced = Bitmap.createBitmap(
+            working.width,
+            working.height,
+            Bitmap.Config.ARGB_8888
+        )
+        Canvas(enhanced).apply {
+            drawColor(Color.WHITE)
+            val contrast = 1.45f
+            val offset = 128f * (1f - contrast)
+            val filterMatrix = ColorMatrix().apply {
+                setSaturation(0f)
+                postConcat(
+                    ColorMatrix(
+                        floatArrayOf(
+                            contrast, 0f, 0f, 0f, offset,
+                            0f, contrast, 0f, 0f, offset,
+                            0f, 0f, contrast, 0f, offset,
+                            0f, 0f, 0f, 1f, 0f
+                        )
+                    )
+                )
+            }
+            drawBitmap(
+                working,
+                0f,
+                0f,
+                Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
+                    colorFilter = ColorMatrixColorFilter(filterMatrix)
+                }
+            )
+        }
+        working.recycle()
+        return enhanced
+    }
+
+    private fun rotateFromExif(bitmap: Bitmap, imageFile: File): Bitmap {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+            return bitmap
+        }
+
+        val orientation = ExifInterface(imageFile.absolutePath).getAttributeInt(
+            ExifInterface.TAG_ORIENTATION,
+            ExifInterface.ORIENTATION_NORMAL
+        )
+        val matrix = Matrix()
+        when (orientation) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+            ExifInterface.ORIENTATION_TRANSPOSE -> {
+                matrix.postScale(-1f, 1f)
+                matrix.postRotate(270f)
+            }
+            ExifInterface.ORIENTATION_TRANSVERSE -> {
+                matrix.postScale(-1f, 1f)
+                matrix.postRotate(90f)
+            }
+            else -> return bitmap
+        }
+
+        return Bitmap.createBitmap(
+            bitmap,
+            0,
+            0,
+            bitmap.width,
+            bitmap.height,
+            matrix,
+            true
+        )
     }
 
     private fun recognizePdfText(call: io.flutter.plugin.common.MethodCall, result: MethodChannel.Result) {
@@ -155,5 +291,10 @@ class MainActivity : FlutterActivity() {
 
         tessBaseApi.setPageSegMode(TessBaseAPI.PageSegMode.PSM_AUTO)
         return true
+    }
+
+    companion object {
+        private const val MIN_OCR_EDGE = 2200
+        private const val MAX_OCR_EDGE = 3600
     }
 }

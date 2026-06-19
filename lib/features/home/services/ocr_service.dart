@@ -11,7 +11,7 @@ class OcrService {
 
   Future<String> recognizeImageText(
     String imagePath, {
-    String language = _mixedLanguage,
+    String language = _khmerLanguage,
   }) async {
     if (Platform.isIOS) {
       final tessDataPath = await _prepareTessDataDirectory();
@@ -63,7 +63,6 @@ class OcrService {
   // ─── Android-only helpers ────────────────────────────────────────────────
 
   static const _khmerLanguage = 'khm';
-  static const _mixedLanguage = 'khm+eng';
   static const _trainedDataFiles = ['khm.traineddata', 'eng.traineddata'];
 
   Future<String> _prepareTessData() async {

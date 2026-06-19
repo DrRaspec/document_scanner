@@ -111,10 +111,7 @@ class HomeController extends GetxController {
 
   Future<void> startScan() async {
     try {
-      final image = await _imagePicker.pickImage(
-        source: ImageSource.camera,
-        imageQuality: 92,
-      );
+      final image = await _imagePicker.pickImage(source: ImageSource.camera);
       if (image == null) {
         return;
       }

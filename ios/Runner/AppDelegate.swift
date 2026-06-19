@@ -1,4 +1,5 @@
 import Flutter
+import CoreImage
 import PDFKit
 import SwiftyTesseract
 import UIKit
@@ -69,7 +70,8 @@ private struct TessDataSource: LanguageModelDataSource {
     language: String,
     result: @escaping FlutterResult
   ) {
-    guard let image = UIImage(contentsOfFile: imagePath) else {
+    guard let sourceImage = UIImage(contentsOfFile: imagePath),
+          let image = prepareImageForOcr(sourceImage) else {
       result(FlutterError(code: "INVALID_IMAGE", message: "Could not load image at path", details: imagePath))
       return
     }
@@ -86,6 +88,44 @@ private struct TessDataSource: LanguageModelDataSource {
         }
       }
     }
+  }
+
+  /// Flattens camera orientation metadata, scales to an OCR-friendly size,
+  /// removes colour, and raises contrast before sending the image to Tesseract.
+  private func prepareImageForOcr(_ image: UIImage) -> UIImage? {
+    let sourceSize = image.size
+    let longestEdge = max(sourceSize.width, sourceSize.height)
+    guard longestEdge > 0 else { return nil }
+
+    let targetEdge = min(max(longestEdge, 2200), 3600)
+    let scale = targetEdge / longestEdge
+    let targetSize = CGSize(
+      width: max(1, sourceSize.width * scale),
+      height: max(1, sourceSize.height * scale)
+    )
+    let format = UIGraphicsImageRendererFormat.default()
+    format.scale = 1
+    format.opaque = true
+    let normalized = UIGraphicsImageRenderer(size: targetSize, format: format).image { context in
+      UIColor.white.setFill()
+      context.fill(CGRect(origin: .zero, size: targetSize))
+      image.draw(in: CGRect(origin: .zero, size: targetSize))
+    }
+
+    guard let input = CIImage(image: normalized),
+          let filter = CIFilter(name: "CIColorControls") else {
+      return normalized
+    }
+    filter.setValue(input, forKey: kCIInputImageKey)
+    filter.setValue(0, forKey: kCIInputSaturationKey)
+    filter.setValue(1.45, forKey: kCIInputContrastKey)
+    filter.setValue(0.03, forKey: kCIInputBrightnessKey)
+
+    guard let output = filter.outputImage,
+          let cgImage = CIContext(options: nil).createCGImage(output, from: output.extent) else {
+      return normalized
+    }
+    return UIImage(cgImage: cgImage, scale: 1, orientation: .up)
   }
 
   private func recognizePdfText(
